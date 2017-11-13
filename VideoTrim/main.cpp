@@ -20,7 +20,8 @@ using json = nlohmann::json;
 
 string video_path, background_path;
 VideoCapture cap;
-Mat background, g_background;
+Mat background;
+vector<Mat> hsv_backgrounds;
 Rect range;
 vector<pf::Particle> particles;
 
@@ -51,8 +52,10 @@ void init(){
     cout << "width: " << width << ", height: " << height << "\n";
     
     background = imread(background_path);
-    g_background = imread(background_path, 0);
-    threshold(g_background, g_background, 0, 255, CV_THRESH_BINARY|CV_THRESH_OTSU);
+//    resize(background, background, Size(background.cols/8, background.rows/8));
+    Mat tmp;
+    cvtColor(background, tmp, CV_BGR2HSV);
+    split(tmp, hsv_backgrounds);
     
     pf::init(particles, 500, 1980, 1080);
 }
@@ -85,18 +88,19 @@ void bgr2hsv(float b, float g, float r, float &h, float &s, float &v){
     }
 }
 double likelihood_color(int x, int y, Mat image){
-    const float b = image.at<Vec3b>(y, x)[0];
-    const float g = image.at<Vec3b>(y, x)[1];
-    const float r = image.at<Vec3b>(y, x)[2];
-    float h, s, v;
-    bgr2hsv(b, g, r, h, s, v);
-    h *= 360;
+    const float s = image.at<unsigned char>(y, x);
+//    const float b = image.at<Vec3b>(y, x)[0];
+//    const float g = image.at<Vec3b>(y, x)[1];
+//    const float r = image.at<Vec3b>(y, x)[2];
+//    float h, s, v;
+//    bgr2hsv(b, g, r, h, s, v);
+//    h *= 360;
 //    return h > 220 && h < 260 ? 1 : 0.01;
-    return s < 0.1 ? 1 : 0.01;
+    return s > 200 ? 1 : 0.01;
 }
 
 int main(int argc, const char * argv[]) {
-    Mat frame, g_frame, diff;
+    Mat frame, diff;
 #if TRIM_VIDEO
     Mat trim_frame, small_trim_frame;
 #else
@@ -113,26 +117,16 @@ int main(int argc, const char * argv[]) {
             break;
         }
         
-#if 1
-        // 背景差分(BGR版)
-        Mat diff3b;
-        vector<Mat> diff3b_channels;
-        absdiff(frame, background, diff3b);
-        split(diff3b, diff3b_channels);
-        bitwise_or(diff3b_channels[0], diff3b_channels[1], diff);
-        bitwise_or(diff3b_channels[2], diff, diff);
-        threshold(diff, diff, 0, 255, CV_THRESH_BINARY|CV_THRESH_OTSU);
-#else
-        cvtColor(frame, g_frame, CV_BGR2GRAY);
-        threshold(g_frame, g_frame, 0, 255, CV_THRESH_BINARY|CV_THRESH_OTSU);
-        absdiff(g_frame, g_background, diff);
-#endif
+        Mat tmp;
+        cvtColor(frame, tmp, CV_BGR2HSV);
+        vector<Mat> hsv_planes;
+        split(tmp, hsv_planes);
+        absdiff(hsv_planes[1], hsv_backgrounds[1], diff);
         
         // Update particles
         pf::resample(particles);
         pf::predict(particles);
-//        pf::weight(particles, diff, likelihood);
-        pf::weight(particles, frame, likelihood_color);
+        pf::weight(particles, diff, likelihood);
         double center_x;
         double center_y;
         pf::measure(particles, center_x, center_y);
