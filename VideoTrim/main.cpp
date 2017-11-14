@@ -52,7 +52,6 @@ void init(){
     cout << "width: " << width << ", height: " << height << "\n";
     
     background = imread(background_path);
-//    resize(background, background, Size(background.cols/8, background.rows/8));
     Mat tmp;
     cvtColor(background, tmp, CV_BGR2HSV);
     split(tmp, hsv_backgrounds);
@@ -96,7 +95,8 @@ double likelihood_color(int x, int y, Mat image){
 //    bgr2hsv(b, g, r, h, s, v);
 //    h *= 360;
 //    return h > 220 && h < 260 ? 1 : 0.01;
-    return s > 200 ? 1 : 0.01;
+    cout << "s: " << s << "\n";
+    return s > 50 ? 1 : 0.0001;
 }
 
 int main(int argc, const char * argv[]) {
@@ -122,11 +122,14 @@ int main(int argc, const char * argv[]) {
         vector<Mat> hsv_planes;
         split(tmp, hsv_planes);
         absdiff(hsv_planes[1], hsv_backgrounds[1], diff);
+        threshold(diff, diff, 0, 255, CV_THRESH_BINARY|CV_THRESH_OTSU);
+//        erode(diff, diff, Mat(), Point(-1, -1), 3);
+//        dilate(diff, diff, Mat(), Point(-1, -1), 3);
         
         // Update particles
         pf::resample(particles);
         pf::predict(particles);
-        pf::weight(particles, diff, likelihood);
+        pf::weight(particles, diff, likelihood_color);
         double center_x;
         double center_y;
         pf::measure(particles, center_x, center_y);
@@ -145,8 +148,10 @@ int main(int argc, const char * argv[]) {
 #if TRIM_VIDEO
         trim_frame = Mat(frame, range);
 //        trim_frame = Mat(diff, range);
-        resize(trim_frame, small_trim_frame, Size(trim_frame.cols/4, trim_frame.rows/4));
-        imshow("VideoTrim", small_trim_frame);
+//        resize(trim_frame, small_trim_frame, Size(trim_frame.cols/4, trim_frame.rows/4));
+//        imshow("VideoTrim", small_trim_frame);
+        resize(diff, diff, Size(diff.cols/4, diff.rows/4));
+        imshow("VideoTrim", diff);
 #else
         Point pt1(range.x, range.y);
         Point pt2(range.x + range.width, range.y + range.height);
