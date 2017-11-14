@@ -11,8 +11,9 @@
 #include "json.hpp"
 #include "particle_filter.hpp"
 
+#define VIDEO_ID 2
 #define TRIM_VIDEO 1
-#define SUBTRACT 1
+#define SCALE 0.5
 
 using namespace std;
 using namespace cv;
@@ -30,13 +31,13 @@ void load_config(const char *path){
     if(input_json.is_open()){
         json j;
         input_json >> j;
-        video_path = j["video_path"];
-        background_path = j["background_path"];
+        video_path = j["video"][VIDEO_ID]["video_path"];
+        background_path = j["video"][VIDEO_ID]["background_path"];
     }
     range.x = 500;
     range.y = 300;
-    range.width = 1920;
-    range.height = 1080;
+    range.width = 1920/2;
+    range.height = 1080/2;
 }
 
 void init(){
@@ -52,11 +53,12 @@ void init(){
     cout << "width: " << width << ", height: " << height << "\n";
     
     background = imread(background_path);
+    resize(background, background, Size(background.cols/2, background.rows/2));
     Mat tmp;
     cvtColor(background, tmp, CV_BGR2HSV);
     split(tmp, hsv_backgrounds);
     
-    pf::init(particles, 500, 1980, 1080);
+    pf::init(particles, 500, 1980/2, 1080/2);
 }
 
 double likelihood(int x, int y, Mat image){
@@ -88,15 +90,25 @@ void bgr2hsv(float b, float g, float r, float &h, float &s, float &v){
 }
 double likelihood_color(int x, int y, Mat image){
     const float s = image.at<unsigned char>(y, x);
-//    const float b = image.at<Vec3b>(y, x)[0];
-//    const float g = image.at<Vec3b>(y, x)[1];
-//    const float r = image.at<Vec3b>(y, x)[2];
-//    float h, s, v;
-//    bgr2hsv(b, g, r, h, s, v);
-//    h *= 360;
-//    return h > 220 && h < 260 ? 1 : 0.01;
-    cout << "s: " << s << "\n";
     return s > 50 ? 1 : 0.0001;
+}
+
+void onMouse(int event, int x, int y, int, void*){
+    switch(event){
+        case EVENT_LBUTTONDOWN:
+            x /= SCALE;
+            y /= SCALE;
+            for(int i = 0; i < particles.size(); i++){
+#if TRIM_VIDEO
+                particles[i].x = x + range.x;
+                particles[i].y = y + range.y;
+#else
+                particles[i].x = x;
+                particles[i].y = y;
+#endif
+            }
+            break;
+    }
 }
 
 int main(int argc, const char * argv[]) {
@@ -109,6 +121,7 @@ int main(int argc, const char * argv[]) {
     
     init();
     namedWindow("VideoTrim", 1);
+    setMouseCallback("VideoTrim", onMouse);
     
     while(waitKey(1) != 'q'){
         cap >> frame;
@@ -116,15 +129,13 @@ int main(int argc, const char * argv[]) {
             cout << "ERROR: failed to capture video.\n";
             break;
         }
-        
+        resize(frame, frame, Size(frame.cols/2, frame.rows/2));
         Mat tmp;
         cvtColor(frame, tmp, CV_BGR2HSV);
         vector<Mat> hsv_planes;
         split(tmp, hsv_planes);
         absdiff(hsv_planes[1], hsv_backgrounds[1], diff);
         threshold(diff, diff, 0, 255, CV_THRESH_BINARY|CV_THRESH_OTSU);
-//        erode(diff, diff, Mat(), Point(-1, -1), 3);
-//        dilate(diff, diff, Mat(), Point(-1, -1), 3);
         
         // Update particles
         pf::resample(particles);
@@ -138,7 +149,7 @@ int main(int argc, const char * argv[]) {
         for(int i = 0; i < particles.size(); i++){
             int x = (int)particles[i].x;
             int y = (int)particles[i].y;
-            circle(diff, Point(x, y), 10, 255, -1);
+            circle(diff, Point(x, y), 5, 255, -1);
         }
         
         range.x = (int)(center_x - range.width/2);
@@ -147,18 +158,14 @@ int main(int argc, const char * argv[]) {
         range.y = std::min(std::max(0, range.y), frame.rows - range.height);
 #if TRIM_VIDEO
         trim_frame = Mat(frame, range);
-//        trim_frame = Mat(diff, range);
-//        resize(trim_frame, small_trim_frame, Size(trim_frame.cols/4, trim_frame.rows/4));
-//        imshow("VideoTrim", small_trim_frame);
-        resize(diff, diff, Size(diff.cols/4, diff.rows/4));
-        imshow("VideoTrim", diff);
+        resize(trim_frame, trim_frame, Size(trim_frame.cols * SCALE, trim_frame.rows * SCALE));
+        imshow("VideoTrim", trim_frame);
 #else
         Point pt1(range.x, range.y);
         Point pt2(range.x + range.width, range.y + range.height);
-        rectangle(diff, pt1, pt2, 255, 10);
-//        resize(frame, small_frame, Size(frame.cols/8, frame.rows/8));
-        resize(diff, small_frame, Size(frame.cols/8, frame.rows/8));
-        imshow("VideoTrim", small_frame);
+        rectangle(diff, pt1, pt2, 255, 5);
+        resize(diff, diff, Size(diff.cols * SCALE, diff.rows * SCALE));
+        imshow("VideoTrim", diff);
 #endif
     }
     
